@@ -16,6 +16,12 @@ XLDEMO_HUGGINGFACE_ACCESS_TOKEN = opts.data.get(
 XLDEMO_LOAD_REFINER_ON_STARTUP = opts.data.get(
     "xldemo_txt2img_load_refiner_on_startup", True)
 
+xldemo_txt2img_1model = opts.data.get(
+    "xldemo_txt2img_1model", "")
+xldemo_txt2img_2model = opts.data.get(
+    "xldemo_txt2img_2model", "")
+xldemo_txt2img_zdy = opts.data.get(
+    "xldemo_txt2img_zdy", True)
 
 def create_infotext(prompt, negative_prompt, seeds, steps, width, height, cfg_scale, index):
 
@@ -58,27 +64,30 @@ def create_infotext_for_refiner(prompt, negative_prompt, seeds, steps, width, he
 class XLDemo:
 
     def __init__(self):
-
-        self.model_key_base = "stabilityai/stable-diffusion-xl-base-0.9"
-        self.model_key_refiner = "stabilityai/stable-diffusion-xl-refiner-0.9"
-
+        if xldemo_txt2img_zdy == True:
+            self.model_key_base = xldemo_txt2img_1model
+            self.model_key_refiner = xldemo_txt2img_2model
+        else:
+            self.model_key_base = "stabilityai/stable-diffusion-xl-base-0.9"
+            self.model_key_refiner = "stabilityai/stable-diffusion-xl-refiner-0.9"
         # Use refiner (eabled by default)
         self.load_refiner_on_startup = XLDEMO_LOAD_REFINER_ON_STARTUP
-
-        if XLDEMO_HUGGINGFACE_ACCESS_TOKEN is not None and XLDEMO_HUGGINGFACE_ACCESS_TOKEN.strip() != '':
+        if (XLDEMO_HUGGINGFACE_ACCESS_TOKEN is not None and XLDEMO_HUGGINGFACE_ACCESS_TOKEN.strip() != '' and xldemo_txt2img_zdy == False) or (xldemo_txt2img_zdy == True and xldemo_txt2img_1model != '' and xldemo_txt2img_2model !=''):
             access_token = XLDEMO_HUGGINGFACE_ACCESS_TOKEN
 
-            print("Loading model", self.model_key_base)
+            print("载入XL基本模型", self.model_key_base)
             self.pipe = DiffusionPipeline.from_pretrained(
-                self.model_key_base, torch_dtype=torch.float16, resume_download=True, use_auth_token=access_token)
+                self.model_key_base, torch_dtype=torch.float16, resume_download=True, use_safetensors=True, use_auth_token=access_token)
+            
             self.pipe.enable_model_cpu_offload()
 
             if self.load_refiner_on_startup:
-                print("Loading model", self.model_key_refiner)
+                print("载入XL精炼模型", self.model_key_refiner)
                 self.pipe_refiner = DiffusionPipeline.from_pretrained(
-                    self.model_key_refiner, torch_dtype=torch.float16, resume_download=True, use_auth_token=access_token)
+                    self.model_key_refiner, torch_dtype=torch.float16, resume_download=True, use_safetensors=True, use_auth_token=access_token)
                 self.pipe_refiner.enable_model_cpu_offload()
-
+        
+        
     def get_fixed_seed(self, seed):
         if seed is None or seed == '' or seed == -1:
             return int(random.randrange(4294967294))
@@ -110,7 +119,7 @@ class XLDemo:
 
         return latents, seeds
 
-    def infer(self, prompt, negative, width, height, cfg_scale, seed, samples, steps):
+    def infer(self, prompt, negative, width, height, cfg_scale, seed, samples, steps, autojy, jystep, jyqd):
         prompt, negative = [prompt] * samples, [negative] * samples
 
         images = []
@@ -121,11 +130,14 @@ class XLDemo:
 
         if self.pipe:
             latents, seeds = self.generate_latents(
-                samples, width, height, self.pipe.unet.in_channels, seed)
+                samples, width, height, self.pipe.unet.config.in_channels, seed)
             images = self.pipe(prompt=prompt, negative_prompt=negative,
                                guidance_scale=cfg_scale, num_inference_steps=steps,
                                latents=latents).images
-
+            if autojy == True:
+                print(f"自动精炼：步数{str(jystep)} 强度{str(jyqd)}")
+                images = self.pipe_refiner(prompt=prompt, negative_prompt=negative,
+                                       image=images, num_inference_steps=int(jystep), strength=float(jyqd)).images
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -177,10 +189,10 @@ class XLDemo:
 xldemo_txt2img = XLDemo()
 
 
-def do_xldemo_txt2img_infer(prompt, negative, width, height, scale, seed, samples, steps):
+def do_xldemo_txt2img_infer(prompt, negative, width, height, scale, seed, samples, steps, autojy, jystep, jyqd):
 
     try:
-        return xldemo_txt2img.infer(prompt, negative, width, height, scale, seed, samples, steps)
+        return xldemo_txt2img.infer(prompt, negative, width, height, scale, seed, samples, steps, autojy, jystep, jyqd)
     except Exception as ex:
         # Raise an Error with a custom error message
         raise gr.Error(f"Error: {str(ex)}")
@@ -189,7 +201,7 @@ def do_xldemo_txt2img_infer(prompt, negative, width, height, scale, seed, sample
 def do_xldemo_txt2img_refine(prompt, negative, seed, steps, enable_refiner, image_to_refine, refiner_strength):
 
     if image_to_refine is None:
-        raise gr.Error(f"Error: Please set the image for refiner")
+        raise gr.Error(f"Error: 请设置好需要精炼的图片")
 
     try:
         return xldemo_txt2img.refine(prompt, negative, seed, steps, enable_refiner, image_to_refine, refiner_strength)
