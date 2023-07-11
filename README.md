@@ -1,3 +1,12 @@
+# 在原作者的基础上更新了一些东西和功能
+* 全中文化
+* 新增本地模型路径设置
+* 增加风格预设文件的载入和读取
+* 增加文生图时自动精炼的勾选框，不用复制到图再手动精炼
+* 其它更新
+* 再次感谢原作者的移植。
+
+
 # Stable Diffusion XL 0.9 txt2img webui extension
 <img src="images/webui.png">
 
